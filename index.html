@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbit IT - Inventory System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#4F6D7A', // Muted Blue/Slate
+                        secondary: '#9AA0A6', // Muted Grey
+                        dark: '#0F1115', // Deep Black/Slate
+                        surface: '#1A1D23', // Dark Slate Surface
+                        border: '#2A2E36', // Subtle Border
+                        textMain: '#E6E8EB',
+                        textSub: '#9AA0A6'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #0F1115;
+            color: #E6E8EB;
+        }
+
+        /* Redefined 'glass' as a solid card for backward compatibility */
+        .glass {
+            background: #1A1D23;
+            border: 1px solid #2A2E36;
+            box-shadow: none;
+            /* No shadow */
+        }
+
+        .sidebar-link {
+            color: #9AA0A6;
+            border-left: 3px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .sidebar-link:hover {
+            background: #2A2E36;
+            color: #E6E8EB;
+        }
+
+        .sidebar-link.active {
+            background: #2A2E36;
+            border-left: 3px solid #4F6D7A;
+            color: #E6E8EB;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0F1115;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #2A2E36;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4F6D7A;
+        }
+
+        /* Table Styles */
+        th {
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            color: #9AA0A6;
+        }
+
+        /* Input Styles Custom Override */
+        input,
+        select,
+        textarea {
+            background-color: #0F1115 !important;
+            border-color: #2A2E36 !important;
+            color: #E6E8EB !important;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            border-color: #4F6D7A !important;
+            box-shadow: none !important;
+            outline: none !important;
+        }
+
+        /* Dark Mode Date Picker Support */
+        ::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+        }
+
+        /* Custom Animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        .animate-slide-up {
+            animation: slideUp 0.5s ease-out forwards;
+        }
+
+        .animate-scale-in {
+            animation: scaleIn 0.3s ease-out forwards;
+        }
+
+        /* Staggered delays for lists */
+        .delay-100 {
+            animation-delay: 100ms;
+        }
+
+        .delay-200 {
+            animation-delay: 200ms;
+        }
+
+        .delay-300 {
+            animation-delay: 300ms;
+        }
+
+        /* Enhanced Interactive Elements */
+        .card-hover {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            border-color: #4F6D7A;
+        }
+
+        /* Smooth Button Effects */
+        button {
+            transition: all 0.2s active;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+
+<body class="bg-dark text-slate-200 h-screen flex overflow-hidden selection:bg-primary selection:text-white"
+    style="color-scheme: dark;">
+
+    <!-- Login Overlay -->
+    <div id="login-overlay"
+        class="fixed inset-0 z-[100] bg-dark flex flex-col items-center justify-center transition-all duration-500">
+        <div class="w-full max-w-sm p-8 flex flex-col items-center animate-scale-in">
+            <div class="mb-8">
+                <img src="./logo.png" alt="Logo" class="h-24 w-auto object-contain mb-2 block mx-auto"
+                    onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                <div class="hidden text-center">
+                    <h1 class="text-3xl font-bold tracking-tight text-white">KIU<span class="text-primary">IMS</span>
+                    </h1>
+                </div>
+            </div>
+
+            <div class="w-full bg-surface border border-border rounded-xl p-6 shadow-2xl">
+                <h2 class="text-xl font-bold text-center mb-6 text-textMain">Welcome Back</h2>
+                <form id="login-form" class="space-y-4">
+                    <div>
+                        <label class="text-xs font-bold text-textSub uppercase tracking-wider mb-1 block">Access
+                            Code</label>
+                        <div class="relative">
+                            <input type="password" id="login-pin"
+                                class="w-full bg-dark border border-border rounded px-4 py-3 text-center tracking-[0.5em] font-bold text-xl focus:border-primary transition-colors"
+                                placeholder="••••" maxlength="4" required autofocus>
+                        </div>
+                    </div>
+                    <button type="submit"
+                        class="w-full py-3 bg-primary hover:bg-[#3E5C69] text-white font-bold rounded transition-all transform active:scale-95 shadow-lg">
+                        Unlock System
+                    </button>
+                    <p id="login-error" class="text-center text-red-400 text-xs h-4 opacity-0 transition-opacity">
+                        Invalid Access Code</p>
+                </form>
+            </div>
+            <p class="mt-8 text-textSub text-xs opacity-50">Authorized Personnel Only</p>
+        </div>
+    </div>
+
+    <!-- Main App Content (Initially Hidden/Blurred) -->
+    <script>
+        // Simple Login Logic
+        document.getElementById('login-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const pin = document.getElementById('login-pin').value;
+            // Default Demo PIN: 1234
+            if (pin === '1234') {
+                const overlay = document.getElementById('login-overlay');
+                overlay.classList.add('opacity-0', 'pointer-events-none');
+                setTimeout(() => {
+                    overlay.style.display = 'none';
+                }, 500);
+            } else {
+                const err = document.getElementById('login-error');
+                err.classList.remove('opacity-0');
+                document.getElementById('login-pin').value = '';
+                document.getElementById('login-pin').classList.add('border-red-500');
+                setTimeout(() => {
+                    err.classList.add('opacity-0');
+                    document.getElementById('login-pin').classList.remove('border-red-500');
+                }, 2000);
+            }
+        });
+    </script>
+
+    <!-- Mobile Header -->
+    <div
+        class="md:hidden fixed w-full z-50 glass flex items-center justify-between p-4 top-0 left-0 border-b border-white/5">
+        <div class="flex items-center gap-3">
+            <div
+                class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-bold">
+                IT</div>
+            <h1 class="text-xl font-bold tracking-tight text-white">KIU<span class="text-primary">IMS</span></h1>
+        </div>
+        <button id="mobile-menu-btn" class="text-slate-300 hover:text-white transition">
+            <i class="fas fa-bars text-xl"></i>
+        </button>
+    </div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar"
+        class="fixed inset-y-0 left-0 z-40 w-64 glass transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 ease-in-out border-r border-white/5 flex flex-col">
+        <div class="h-32 flex items-center justify-center border-b border-border bg-black/20">
+            <div class="w-full flex flex-col items-center justify-center">
+                <img src="./logo.png" alt="KIU IMS"
+                    class="h-24 w-auto object-contain block transition-transform hover:scale-105"
+                    onerror="this.style.display='none'; document.getElementById('fallback-logo').classList.remove('hidden');">
+                <div id="fallback-logo" class="hidden text-center">
+                    <h1 class="text-3xl font-bold tracking-tight text-white">KIU<span class="text-primary">IMS</span>
+                    </h1>
+                    <p class="text-[10px] text-textSub uppercase tracking-wider font-semibold mt-1">Inventory System</p>
+                </div>
+            </div>
+        </div>
+
+        <nav class="flex-1 px-4 space-y-2 mt-4 overflow-y-auto">
+            <p class="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Main</p>
+            <a href="#" data-view="dashboard"
+                class="sidebar-link active flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-white/5 hover:text-white transition-all group">
+                <i class="fas fa-chart-pie w-5 text-center group-hover:text-primary transition-colors"></i>
+                <span class="font-medium">Dashboard</span>
+            </a>
+            <a href="#" data-view="assets"
+                class="sidebar-link flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-white/5 hover:text-white transition-all group">
+                <i class="fas fa-laptop w-5 text-center group-hover:text-primary transition-colors"></i>
+                <span class="font-medium">Assets</span>
+            </a>
+            <a href="#" data-view="staff"
+                class="sidebar-link flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-white/5 hover:text-white transition-all group">
+                <i class="fas fa-users w-5 text-center group-hover:text-primary transition-colors"></i>
+                <span class="font-medium">Staff & Issuance</span>
+            </a>
+            <a href="#" data-view="cctv"
+                class="sidebar-link flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-white/5 hover:text-white transition-all group">
+                <i class="fas fa-video w-5 text-center group-hover:text-primary transition-colors"></i>
+                <span class="font-medium">CCTV Monitor</span>
+            </a>
+            <a href="#" data-view="accessories"
+                class="sidebar-link flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-white/5 hover:text-white transition-all group">
+                <i class="fas fa-microchip w-5 text-center group-hover:text-primary transition-colors"></i>
+                <span class="font-medium">Accessories</span>
+            </a>
+            <a href="#" data-view="repairs"
+                class="sidebar-link flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-white/5 hover:text-white transition-all group">
+                <i class="fas fa-tools w-5 text-center group-hover:text-primary transition-colors"></i>
+                <span class="font-medium">Repairs Log</span>
+            </a>
+        </nav>
+
+        <div class="p-4 mt-auto border-t border-border">
+            <button
+                onclick="document.getElementById('login-overlay').style.display='flex'; setTimeout(() => document.getElementById('login-overlay').classList.remove('opacity-0', 'pointer-events-none'), 10); document.getElementById('login-pin').value='';"
+                class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-textSub hover:bg-red-500/10 hover:text-red-500 transition-all group">
+                <i class="fas fa-sign-out-alt w-5 text-center transition-colors"></i>
+                <span class="font-medium">Logout System</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main
+        class="flex-1 flex flex-col h-full relative overflow-hidden bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-dark to-dark">
+        <!-- Overlay for mobile sidebar -->
+        <div id="sidebar-overlay"
+            class="fixed inset-0 bg-black/50 z-30 hidden md:hidden backdrop-blur-sm transition-opacity"></div>
+
+        <!-- Scrollable Content Area -->
+        <!-- Scrollable Content Area -->
+        <div id="content-area" class="flex-1 overflow-y-auto p-4 md:p-8 pt-[6.5rem] md:pt-8 scroll-smooth">
+
+            <!-- Views Container -->
+            <div id="view-container" class="max-w-7xl mx-auto space-y-6">
+                <!-- Content injected via JS -->
+                <div class="animate-pulse flex flex-col gap-4">
+                    <div class="h-8 bg-slate-800 rounded w-1/4"></div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="h-32 bg-slate-800 rounded-xl"></div>
+                        <div class="h-32 bg-slate-800 rounded-xl"></div>
+                        <div class="h-32 bg-slate-800 rounded-xl"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Modals Container -->
+    <div id="modal-container" class="relative z-[60]"></div>
+
+    <!-- Scripts -->
+    <!-- <script src="https://unpkg.com/dexie/dist/dexie.js"></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- Error Handling & Pre-checks -->
+    <script>
+        window.onerror = function (msg, url, line, col, error) {
+            const container = document.getElementById('view-container');
+            if (container) {
+                container.innerHTML = `
+                    <div class="p-6 bg-red-500/10 border border-red-500/50 rounded-2xl text-red-200">
+                        <h3 class="text-xl font-bold mb-2"><i class="fas fa-bug"></i> Application Error</h3>
+                        <p class="font-mono text-sm mb-4">${msg}</p>
+                        <p class="text-xs text-red-400">File: ${url}:${line}:${col}</p>
+                        ${window.location.protocol === 'file:' ? '<br><p class="font-bold text-amber-400 uppercase">Warning: You are running this via file:// protocol. Browsers block modules in this mode. Please run a local server (see README.md).</p>' : ''}
+                    </div>
+                `;
+            }
+            return false;
+        };
+    </script>
+    <script type="module" src="./js/app.js"></script>
+</body>
+
+</html>
