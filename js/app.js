@@ -413,141 +413,165 @@ const renderCCTV = async (container) => {
     const premiseNames = sortedPremises && sortedPremises.length > 0 ? sortedPremises.map(p => p.name) : ['Main Premise'];
     const allPremises = premiseNames;
 
-    // State for active tab (simple variable for render)
-    // We store it in a data attribute or global if we want persistence, 
-    // but for now let's default to first or use a query param logic if we were complex.
-    // simpler: re-render on tab click.
-    // Actually, since we are inside a function, we can't easily persist state without a global or re-calling renderCCTV with arg.
-    // Let's attach a global tracker for current premise view if not exists.
+    // Set default premise if needed
     if (!window.currentCctvPremise) window.currentCctvPremise = allPremises[0];
 
-    // Helper to switch tab
-    window.switchCctvPremise = (p) => {
-        window.currentCctvPremise = p;
-        renderCCTV(document.getElementById('view-container'));
-    };
-
-    const tabsHtml = allPremises.map(p => `
-        <button onclick="window.switchCctvPremise('${p}')" 
-            class="px-4 py-2 text-sm font-bold rounded-t-lg transition-colors border-b-2 
-            ${window.currentCctvPremise === p
-            ? 'text-primary border-primary bg-surface'
-            : 'text-textSub border-transparent hover:text-textMain hover:bg-white/5'}">
-            ${p}
-        </button>
-    `).join('');
-
-    // Filter cameras for current premise
-    const currentCameras = cameras.filter(c => (c.premise || 'Main Premise') === window.currentCctvPremise);
-
-    // Filter Lists (Active for floor plan, others for inventory)
-    // Note: Inventory (Stock/Scrap) might be global or per premise? 
-    // Usually Stock is global, but Installed is per premise.
-    // Let's show Stock global, but Installed tailored to premise.
-
-    const stockList = cameras.filter(c => c.status === 'In Stock');
-    const scrapList = cameras.filter(c => c.status === 'Damaged');
-
-    // Active cameras for this premise only
-    const activeCameras = currentCameras.filter(c => c.status !== 'In Stock' && c.status !== 'Damaged');
-
-    const inventoryHtml = `
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-             <div class="bg-surface p-5 rounded border border-border">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-textSub font-bold uppercase tracking-wider text-xs flex items-center gap-2">
-                        <i class="fas fa-box text-primary"></i> Global Stock (${stockList.length})
-                    </h3>
-                    <button onclick="window.openAddStockCameraModal()" class="text-[10px] font-bold text-white bg-primary hover:bg-[#3E5C69] px-2.5 py-1 rounded transition-colors">
-                        <i class="fas fa-plus"></i> Add
+    // Inject Shell (Header + Content Container)
+    container.innerHTML = `
+        <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+            <h2 class="text-2xl font-bold text-textMain">CCTV Monitoring</h2>
+            <div class="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                 <div class="relative flex-1 md:w-64">
+                    <input type="text" id="cctv-search" placeholder="Search cameras..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
+                    <i class="fas fa-search absolute left-3 top-2.5 text-textSub text-xs"></i>
+                </div>
+                <div class="flex gap-2">
+                     <button onclick="window.openManagePremisesModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
+                        <i class="fas fa-building mr-1"></i> Premises
+                    </button>
+                    <button onclick="window.openManageFloorsModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
+                        <i class="fas fa-layer-group mr-1"></i> Floors
+                    </button>
+                    <button onclick="window.downloadCCTVReport()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
+                        <i class="fas fa-download mr-1"></i> Export
+                    </button>
+                    <button onclick="window.openAddCCTVModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none">
+                        <i class="fas fa-plus mr-2"></i> Add Camera
                     </button>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto custom-scrollbar">
-                    ${stockList.map(CCTVCard).join('') || '<p class="text-textSub text-xs italic col-span-2">No cameras in stock.</p>'}
-                </div>
-            </div>
-            
-            <div class="bg-surface p-5 rounded border border-border">
-                <h3 class="text-textSub font-bold uppercase tracking-wider text-xs mb-4 flex items-center gap-2">
-                    <i class="fas fa-trash-alt text-secondary"></i> Global Scrap (${scrapList.length})
-                </h3>
-                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto custom-scrollbar">
-                    ${scrapList.map(CCTVCard).join('') || '<p class="text-textSub text-xs italic col-span-2">No damaged cameras.</p>'}
-                </div>
             </div>
         </div>
+        
+        <div id="cctv-content"></div>
     `;
 
-    // Group Active by Floor
-    const floors = {};
-    activeCameras.forEach(cam => {
-        const floor = cam.floor || 'Unassigned';
-        if (!floors[floor]) floors[floor] = [];
-        floors[floor].push(cam);
-    });
+    // Function to render the inner grids based on current state and search
+    const renderGrids = () => {
+        const searchTerm = document.getElementById('cctv-search')?.value.toLowerCase() || '';
 
-    // Custom floor order helper (Defined by DB sort_order now)
-    // We already have allFloors sorted by sort_order from fetchFloors
-    // But we need to map floor names to their order index
-    const floorOrderMap = {};
-    if (window.allFloors) {
-        window.allFloors.forEach((f, index) => {
-            floorOrderMap[f.name] = f.sort_order;
+        // Filter tabs logic
+        const tabsHtml = allPremises.map(p => `
+            <button onclick="window.switchCctvPremise('${p}')" 
+                class="px-4 py-2 text-sm font-bold rounded-t-lg transition-colors border-b-2 
+                ${window.currentCctvPremise === p
+                ? 'text-primary border-primary bg-surface'
+                : 'text-textSub border-transparent hover:text-textMain hover:bg-white/5'}">
+                ${p}
+            </button>
+        `).join('');
+
+        // Apply Search Filter
+        const filteredCameras = cameras.filter(c => {
+            if (!searchTerm) return true;
+            return (c.cameraLocation && c.cameraLocation.toLowerCase().includes(searchTerm)) ||
+                (c.model && c.model.toLowerCase().includes(searchTerm)) ||
+                (c.serialNumber && c.serialNumber.toLowerCase().includes(searchTerm)) ||
+                (c.status && c.status.toLowerCase().includes(searchTerm)) ||
+                (c.floor && c.floor.toLowerCase().includes(searchTerm));
         });
-    }
 
-    const sortedFloors = Object.keys(floors).sort((a, b) => {
-        const orderA = floorOrderMap[a] !== undefined ? floorOrderMap[a] : 999;
-        const orderB = floorOrderMap[b] !== undefined ? floorOrderMap[b] : 999;
+        // Split Lists
+        const stockList = filteredCameras.filter(c => c.status === 'In Stock');
+        const scrapList = filteredCameras.filter(c => c.status === 'Damaged');
 
-        if (orderA !== orderB) return orderA - orderB;
-        return a.localeCompare(b);
-    });
+        // Active cameras for this premise only
+        // Note: Search applies globally to stock/scrap, but active depends on tab + search
+        const activeCameras = filteredCameras.filter(c =>
+            c.status !== 'In Stock' &&
+            c.status !== 'Damaged' &&
+            (c.premise || 'Main Premise') === window.currentCctvPremise
+        );
 
-    const floorHtml = sortedFloors.length > 0 ? sortedFloors.map(floor => `
-        <div class="space-y-4">
-             <div class="flex items-center gap-3">
-                <div class="h-px flex-1 bg-border"></div>
-                <h3 class="text-sm font-bold text-textSub uppercase tracking-wider bg-dark px-3 py-1 rounded border border-border">${floor} Floor</h3>
-                <div class="h-px flex-1 bg-border"></div>
+        const inventoryHtml = `
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                 <div class="bg-surface p-5 rounded border border-border">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-textSub font-bold uppercase tracking-wider text-xs flex items-center gap-2">
+                            <i class="fas fa-box text-primary"></i> Global Stock (${stockList.length})
+                        </h3>
+                        <button onclick="window.openAddStockCameraModal()" class="text-[10px] font-bold text-white bg-primary hover:bg-[#3E5C69] px-2.5 py-1 rounded transition-colors">
+                            <i class="fas fa-plus"></i> Add
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto custom-scrollbar">
+                        ${stockList.map(CCTVCard).join('') || '<p class="text-textSub text-xs italic col-span-2">No cameras found in stock matching query.</p>'}
+                    </div>
+                </div>
+                
+                <div class="bg-surface p-5 rounded border border-border">
+                    <h3 class="text-textSub font-bold uppercase tracking-wider text-xs mb-4 flex items-center gap-2">
+                        <i class="fas fa-trash-alt text-secondary"></i> Global Scrap (${scrapList.length})
+                    </h3>
+                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto custom-scrollbar">
+                        ${scrapList.map(CCTVCard).join('') || '<p class="text-textSub text-xs italic col-span-2">No damaged cameras matching query.</p>'}
+                    </div>
+                </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                ${floors[floor].map(CCTVCard).join('')}
-            </div>
-        </div>
-    `).join('') : '<div class="text-center py-12 border border-dashed border-white/10 rounded-xl"><p class="text-textSub">No active cameras in this premise.</p></div>';
+        `;
 
-    container.innerHTML = `
-        <div class="flex justify-between items-center mb-6">
-            <h2 class="text-2xl font-bold text-textMain">CCTV Monitoring</h2>
-            <div>
-                 <button onclick="window.openManagePremisesModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none mr-2">
-                    <i class="fas fa-building mr-1"></i> Premises
-                </button>
-                <button onclick="window.openManageFloorsModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none mr-2">
-                    <i class="fas fa-layer-group mr-1"></i> Floors
-                </button>
-                <button onclick="window.downloadCCTVReport()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none mr-2">
-                    <i class="fas fa-download mr-1"></i> Export
-                </button>
-                <button onclick="window.openAddCCTVModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none">
-                    <i class="fas fa-plus mr-2"></i> Add Camera
-                </button>
-            </div>
-        </div>
+        // Group Active by Floor
+        const floors = {};
+        activeCameras.forEach(cam => {
+            const floor = cam.floor || 'Unassigned';
+            if (!floors[floor]) floors[floor] = [];
+            floors[floor].push(cam);
+        });
 
-    ${inventoryHtml}
-        
-        <div class="mb-6">
-            <div class="flex border-b border-white/10 overflow-x-auto gap-1">
-                ${tabsHtml}
-            </div>
-        </div>
+        // Floor Sorting logic
+        const floorOrderMap = {};
+        if (window.allFloors) {
+            window.allFloors.forEach((f) => {
+                floorOrderMap[f.name] = f.sort_order;
+            });
+        }
 
-        <div id="cctv-floors" class="space-y-12">
-            ${floorHtml}
-        </div>
-`;
+        const sortedFloors = Object.keys(floors).sort((a, b) => {
+            const orderA = floorOrderMap[a] !== undefined ? floorOrderMap[a] : 999;
+            const orderB = floorOrderMap[b] !== undefined ? floorOrderMap[b] : 999;
+            if (orderA !== orderB) return orderA - orderB;
+            return a.localeCompare(b);
+        });
+
+        const floorHtml = sortedFloors.length > 0 ? sortedFloors.map(floor => `
+            <div class="space-y-4">
+                 <div class="flex items-center gap-3">
+                    <div class="h-px flex-1 bg-border"></div>
+                    <h3 class="text-sm font-bold text-textSub uppercase tracking-wider bg-dark px-3 py-1 rounded border border-border">${floor} Floor</h3>
+                    <div class="h-px flex-1 bg-border"></div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    ${floors[floor].map(CCTVCard).join('')}
+                </div>
+            </div>
+        `).join('') : `<div class="text-center py-12 border border-dashed border-white/10 rounded-xl"><p class="text-textSub">${searchTerm ? 'No cameras match your search.' : 'No active cameras in this premise.'}</p></div>`;
+
+        // Update Content
+        document.getElementById('cctv-content').innerHTML = `
+            ${inventoryHtml}
+            
+            <div class="mb-6">
+                <div class="flex border-b border-white/10 overflow-x-auto gap-1">
+                    ${tabsHtml}
+                </div>
+            </div>
+
+            <div id="cctv-floors" class="space-y-12">
+                ${floorHtml}
+            </div>
+        `;
+    };
+
+    // Helper to switch tab (updates internal state and re-renders grids only)
+    window.switchCctvPremise = (p) => {
+        window.currentCctvPremise = p;
+        renderGrids();
+    };
+
+    // Initial Render
+    renderGrids();
+
+    // Attach Search Listener
+    document.getElementById('cctv-search').addEventListener('input', renderGrids);
 };
 
 // --- REWRITTEN ACCESSORIES PAGE ---
