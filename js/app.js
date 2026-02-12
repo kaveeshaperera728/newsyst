@@ -7,7 +7,7 @@ let currentView = 'dashboard';
 
 const init = async () => {
     setupNavigation();
-    renderView('dashboard');
+    window.renderView('dashboard');
 };
 
 const setupNavigation = () => {
@@ -19,7 +19,7 @@ const setupNavigation = () => {
             document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
             link.classList.add('active');
 
-            renderView(view);
+            window.renderView(view);
 
             if (window.innerWidth < 768) {
                 document.getElementById('sidebar').classList.add('-translate-x-full');
@@ -41,7 +41,7 @@ const setupNavigation = () => {
     overlay.addEventListener('click', toggleMenu);
 };
 
-const renderView = async (view) => {
+window.renderView = async (view, params = {}) => {
     currentView = view;
     const container = document.getElementById('view-container');
     container.innerHTML = '<div class="animate-pulse h-64 bg-white/5 rounded-2xl"></div>';
@@ -52,7 +52,7 @@ const renderView = async (view) => {
                 await renderDashboard(container);
                 break;
             case 'assets':
-                await renderAssets(container);
+                await renderAssets(container, params);
                 break;
             case 'staff':
                 await renderStaff(container);
@@ -118,7 +118,7 @@ const renderDashboard = async (container) => {
     const issuedDetails = `
         <div class="flex justify-between items-center"><span class="opacity-70">Laptops:</span> <span class="font-bold text-textMain">${counts.issuedLaptops}</span></div>
         <div class="flex justify-between items-center"><span class="opacity-70">Mobiles:</span> <span class="font-bold text-textMain">${counts.issuedMobiles}</span></div>
-        <div class="flex justify-between items-center text-[#4ADE80] mt-1 pt-1 border-t border-border"><span class="opacity-90">Available to Issue:</span> <span class="font-bold">${counts.available}</span></div>
+        <div onclick="window.renderView('assets', { status: 'Available' })" class="cursor-pointer hover:bg-white/5 transition-colors rounded px-1 -mx-1 flex justify-between items-center text-[#4ADE80] mt-1 pt-1 border-t border-border" title="Click to view available assets"><span class="opacity-90">Available to Issue:</span> <span class="font-bold">${counts.available}</span></div>
     `;
 
     const repairDetails = `
@@ -202,38 +202,84 @@ const renderDashboard = async (container) => {
     if (assignContainer) assignContainer.innerHTML = assHtml;
 };
 
-const renderAssets = async (container) => {
+const renderAssets = async (container, params = {}) => {
+    const initialStatus = params.status || '';
+
     container.innerHTML = `
         <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
             <h2 class="text-2xl font-bold text-textMain">Asset Inventory</h2>
-            <div class="flex gap-3 w-full md:w-auto">
+            <div class="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                <div class="relative flex-1 md:w-48">
+                     <select id="asset-filter-status" class="w-full bg-surface border border-border rounded px-4 py-2 text-sm focus:border-primary transition-colors text-textMain appearance-none cursor-pointer">
+                        <option value="">All Statuses</option>
+                        <option value="Available" ${initialStatus === 'Available' ? 'selected' : ''}>Available</option>
+                        <option value="Issued">Issued</option>
+                        <option value="Repair">In Repair</option>
+                        <option value="Scrap">Scrap</option>
+                    </select>
+                    <i class="fas fa-filter absolute right-3 top-2.5 text-textSub text-xs pointer-events-none"></i>
+                </div>
                 <div class="relative flex-1 md:w-64">
-                    <input type="text" id="asset-search" placeholder="Search serial..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
+                    <input type="text" id="asset-search" placeholder="Search serial, model..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
                     <i class="fas fa-search absolute left-3 top-2.5 text-textSub text-xs"></i>
                 </div>
-                <button onclick="window.openAddAssetModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none">
+                <button onclick="window.openAddAssetModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none whitespace-nowrap">
                     <i class="fas fa-plus mr-2"></i> Add Asset
                 </button>
             </div>
         </div>
-        ${Table(['Serial', 'Model', 'Type', 'Status', 'Actions'], 'assets-body')}
+
+        ${Table(['Serial', 'Model', 'Type', 'Status', 'Assigned To', 'Actions'], 'assets-body')}
     `;
 
-    const { data: assets } = await supabase.from('assets').select('*');
+    const { data: assets } = await supabase.from('assets').select('*').order('created_at', { ascending: false });
+
+    // Fetch active assignments to map assetId -> staffName
+    const { data: assignments } = await supabase.from('assignments')
+        .select('assetId, staff(name)')
+        .is('returnDate', null);
+
+    const assignmentMap = {};
+    if (assignments) {
+        assignments.forEach(a => {
+            if (a.staff) assignmentMap[a.assetId] = a.staff.name;
+        });
+    }
 
     const renderRows = (list) => {
-        document.getElementById('assets-body').innerHTML = list.map(AssetRow).join('');
+        const tbody = document.getElementById('assets-body');
+        if (list.length > 0) {
+            tbody.innerHTML = list.map(asset => AssetRow(asset, assignmentMap[asset.id])).join('');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-textSub italic">No assets found matching criteria.</td></tr>';
+        }
     };
-    if (assets) renderRows(assets);
 
-    document.getElementById('asset-search').addEventListener('input', (e) => {
-        const term = e.target.value.toLowerCase();
-        const filtered = assets.filter(a =>
-            a.serialNumber.toLowerCase().includes(term) ||
-            a.model.toLowerCase().includes(term)
-        );
+    const filterAssets = () => {
+        const term = document.getElementById('asset-search').value.toLowerCase();
+        const status = document.getElementById('asset-filter-status').value;
+
+        if (!assets) return;
+
+        const filtered = assets.filter(a => {
+            const matchesSearch = (a.serialNumber && a.serialNumber.toLowerCase().includes(term)) ||
+                (a.model && a.model.toLowerCase().includes(term)) ||
+                (assignmentMap[a.id] && assignmentMap[a.id].toLowerCase().includes(term));
+            const matchesStatus = status === '' || a.status === status;
+            return matchesSearch && matchesStatus;
+        });
+
         renderRows(filtered);
-    });
+    };
+
+    if (assets) {
+        // Initial Render (respecting initial filter)
+        filterAssets();
+    }
+
+    // Event Listeners
+    document.getElementById('asset-search').addEventListener('input', filterAssets);
+    document.getElementById('asset-filter-status').addEventListener('change', filterAssets);
 };
 
 const renderStaff = async (container) => {
@@ -242,7 +288,7 @@ const renderStaff = async (container) => {
             <h2 class="text-2xl font-bold text-textMain">Staff Directory</h2>
             <div class="flex gap-3 w-full md:w-auto">
                 <div class="relative flex-1 md:w-64">
-                    <input type="text" id="staff-search" placeholder="Search staff..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
+                    <input type="text" id="staff-search" placeholder="Search name, ID, department..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
                     <i class="fas fa-search absolute left-3 top-2.5 text-textSub text-xs"></i>
                 </div>
                 <button onclick="window.openAddStaffModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none">
@@ -254,7 +300,7 @@ const renderStaff = async (container) => {
     `;
 
     // Fetch staff and their active assignments count
-    const { data: staff } = await supabase.from('staff').select('*');
+    const { data: staff } = await supabase.from('staff').select('*').order('name');
     const { data: activeAssignments } = await supabase.from('assignments').select('staffId').is('returnDate', null);
 
     if (staff) {
@@ -417,28 +463,39 @@ const renderCCTV = async (container) => {
     if (!window.currentCctvPremise) window.currentCctvPremise = allPremises[0];
 
     // Inject Shell (Header + Content Container)
+    // Inject Shell (Header + Content Container)
     container.innerHTML = `
-        <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+        <div class="flex flex-col xl:flex-row justify-between items-center gap-4 mb-6">
             <h2 class="text-2xl font-bold text-textMain">CCTV Monitoring</h2>
-            <div class="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-                 <div class="relative flex-1 md:w-64">
-                    <input type="text" id="cctv-search" placeholder="Search cameras..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
-                    <i class="fas fa-search absolute left-3 top-2.5 text-textSub text-xs"></i>
+            <div class="flex flex-wrap gap-2 justify-center xl:justify-end w-full xl:w-auto">
+                 <div class="relative w-full sm:w-48 order-first xl:order-none mb-2 xl:mb-0">
+                     <select id="cctv-sort" class="w-full bg-surface border border-border rounded px-3 py-2 text-xs focus:border-primary transition-colors text-textMain appearance-none cursor-pointer">
+                        <option value="location">Sort by Location</option>
+                        <option value="model">Sort by Model</option>
+                        <option value="status-working">Sort by Working</option>
+                        <option value="status-faulty">Sort by Faulty</option>
+                        <option value="serial">Sort by Serial</option>
+                        <option value="date-newest">Sort by Date (Newest)</option>
+                        <option value="date-oldest">Sort by Date (Oldest)</option>
+                    </select>
+                    <i class="fas fa-sort absolute right-3 top-2.5 text-textSub text-[10px] pointer-events-none"></i>
                 </div>
-                <div class="flex gap-2">
-                     <button onclick="window.openManagePremisesModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
-                        <i class="fas fa-building mr-1"></i> Premises
-                    </button>
-                    <button onclick="window.openManageFloorsModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
-                        <i class="fas fa-layer-group mr-1"></i> Floors
-                    </button>
-                    <button onclick="window.downloadCCTVReport()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
-                        <i class="fas fa-download mr-1"></i> Export
-                    </button>
-                    <button onclick="window.openAddCCTVModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none">
-                        <i class="fas fa-plus mr-2"></i> Add Camera
-                    </button>
+                 <div class="relative w-full sm:w-64 order-first xl:order-none mb-2 xl:mb-0">
+                    <input type="text" id="cctv-search" placeholder="Search location, model, serial..." class="w-full bg-surface border border-border rounded px-3 py-2 pl-8 text-xs focus:border-primary transition-colors">
+                    <i class="fas fa-search absolute left-2.5 top-2.5 text-textSub text-[10px]"></i>
                 </div>
+                 <button onclick="window.openManagePremisesModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
+                    <i class="fas fa-building mr-1"></i> Premises
+                </button>
+                <button onclick="window.openManageFloorsModal()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
+                    <i class="fas fa-layer-group mr-1"></i> Floors
+                </button>
+                <button onclick="window.downloadCCTVReport()" class="px-3 py-2 bg-dark hover:bg-surface border border-border rounded text-textSub hover:text-textMain font-medium text-xs transition-all shadow-none">
+                    <i class="fas fa-download mr-1"></i> Export
+                </button>
+                <button onclick="window.openAddCCTVModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none">
+                    <i class="fas fa-plus mr-2"></i> Add Camera
+                </button>
             </div>
         </div>
         
@@ -448,6 +505,7 @@ const renderCCTV = async (container) => {
     // Function to render the inner grids based on current state and search
     const renderGrids = () => {
         const searchTerm = document.getElementById('cctv-search')?.value.toLowerCase() || '';
+        const sortMode = document.getElementById('cctv-sort')?.value || 'location';
 
         // Filter tabs logic
         const tabsHtml = allPremises.map(p => `
@@ -540,10 +598,22 @@ const renderCCTV = async (container) => {
                     <div class="h-px flex-1 bg-border"></div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    ${floors[floor].map(CCTVCard).join('')}
-                </div>
+                ${floors[floor].sort((a, b) => {
+            switch (sortMode) {
+                case 'location': return a.cameraLocation.localeCompare(b.cameraLocation);
+                case 'model': return (a.model || '').localeCompare(b.model || '');
+                case 'serial': return (a.serialNumber || '').localeCompare(b.serialNumber || '');
+                case 'model': return (a.model || '').localeCompare(b.model || '');
+                case 'status-working': return (a.status === 'Working' ? -1 : 1);
+                case 'status-faulty': return (a.status === 'Faulty' ? -1 : 1);
+                case 'serial': return (a.serialNumber || '').localeCompare(b.serialNumber || '');
+                case 'date-oldest': return new Date(a.installDate || 0) - new Date(b.installDate || 0);
+                default: return 0;
+            }
+        }).map(CCTVCard).join('')}
             </div>
-        `).join('') : `<div class="text-center py-12 border border-dashed border-white/10 rounded-xl"><p class="text-textSub">${searchTerm ? 'No cameras match your search.' : 'No active cameras in this premise.'}</p></div>`;
+        </div>
+    `).join('') : `<div class="text-center py-12 border border-dashed border-white/10 rounded-xl"><p class="text-textSub">${searchTerm ? 'No cameras match your search.' : 'No active cameras in this premise.'}</p></div>`;
 
         // Update Content
         document.getElementById('cctv-content').innerHTML = `
@@ -570,24 +640,31 @@ const renderCCTV = async (container) => {
     // Initial Render
     renderGrids();
 
-    // Attach Search Listener
+    // Attach Search & Sort Listeners
     document.getElementById('cctv-search').addEventListener('input', renderGrids);
+    document.getElementById('cctv-sort').addEventListener('change', renderGrids);
 };
 
 // --- REWRITTEN ACCESSORIES PAGE ---
 const renderAccessories = async (container) => {
     container.innerHTML = `
-        <div class="flex justify-between items-center mb-6">
+        <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
             <h2 class="text-2xl font-bold text-textMain">Accessories Inventory</h2>
-            <button onclick="window.openAddAccessoryModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none">
-                <i class="fas fa-plus mr-2"></i> Add Accessory
-            </button>
+            <div class="flex gap-3 w-full md:w-auto">
+                 <div class="relative flex-1 md:w-64">
+                    <input type="text" id="accessory-search" placeholder="Search type, brand, model..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
+                    <i class="fas fa-search absolute left-3 top-2.5 text-textSub text-xs"></i>
+                </div>
+                <button onclick="window.openAddAccessoryModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium text-sm transition-all shadow-none whitespace-nowrap">
+                    <i class="fas fa-plus mr-2"></i> Add Accessory
+                </button>
+            </div>
         </div>
-    ${Table(['Serial', 'Type', 'Brand', 'Model', 'Status', 'Assigned To', 'Actions'], 'accessories-body')}
-`;
+        ${Table(['Serial', 'Type', 'Brand', 'Model', 'Status', 'Assigned To', 'Actions'], 'accessories-body')}
+    `;
 
     // Fetch individual accessories with allocated asset
-    const { data: accessories } = await supabase.from('accessories').select('*, assets(model, serialNumber)');
+    const { data: accessories } = await supabase.from('accessories').select('*, assets(model, serialNumber)').order('created_at', { ascending: false });
 
     const statusClasses = {
         'Available': 'bg-[#163326] text-[#4ADE80] border border-[#163326]',
@@ -595,7 +672,8 @@ const renderAccessories = async (container) => {
         'Faulty': 'bg-[#331616] text-[#F87171] border border-[#331616]'
     };
 
-    const rows = accessories ? accessories.map(acc => `
+    const renderRows = (list) => {
+        const rows = list && list.length > 0 ? list.map(acc => `
         <tr class="hover:bg-dark transition-colors group">
             <td class="p-4 text-textMain font-mono text-sm">${acc.serialNumber || '-'}</td>
             <td class="p-4 text-textSub font-medium text-sm">${acc.type}</td>
@@ -608,8 +686,8 @@ const renderAccessories = async (container) => {
             </td>
             <td class="p-4 text-textSub text-xs">
                 ${acc.status === 'Installed' && acc.assets
-            ? `<span class="text-primary font-medium">${acc.assets.model}</span> <span class="opacity-70">(${acc.assets.serialNumber})</span>`
-            : '-'}
+                ? `<span class="text-primary font-medium">${acc.assets.model}</span> <span class="opacity-70">(${acc.assets.serialNumber})</span>`
+                : '-'}
             </td>
             <td class="p-4">
                 <div class="flex gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
@@ -620,16 +698,31 @@ const renderAccessories = async (container) => {
                         <i class="fas fa-edit"></i>
                     </button>
                     ${acc.status === 'Available'
-            ? `<button onclick="window.deleteAccessory(${acc.id})" class="p-2 hover:text-[#F87171] transition-colors" title="Delete">
+                ? `<button onclick="window.deleteAccessory(${acc.id})" class="p-2 hover:text-[#F87171] transition-colors" title="Delete">
                              <i class="fas fa-trash"></i>
                            </button>`
-            : ''}
+                : ''}
                 </div>
             </td>
         </tr>
-    `).join('') : '';
+    `).join('') : '<tr><td colspan="7" class="p-8 text-center text-textSub italic">No accessories found.</td></tr>';
 
-    document.getElementById('accessories-body').innerHTML = rows;
+        document.getElementById('accessories-body').innerHTML = rows;
+    };
+
+    if (accessories) renderRows(accessories);
+
+    document.getElementById('accessory-search').addEventListener('input', (e) => {
+        const term = e.target.value.toLowerCase();
+        if (!accessories) return;
+        const filtered = accessories.filter(a =>
+            (a.type && a.type.toLowerCase().includes(term)) ||
+            (a.brand && a.brand.toLowerCase().includes(term)) ||
+            (a.model && a.model.toLowerCase().includes(term)) ||
+            (a.serialNumber && a.serialNumber.toLowerCase().includes(term))
+        );
+        renderRows(filtered);
+    });
 };
 
 window.viewAccessoryHistory = async (id) => {
@@ -761,7 +854,7 @@ window.editAccessory = async (id) => {
 window.deleteAccessory = async (id) => {
     if (confirm('Delete this accessory item?')) {
         await supabase.from('accessories').delete().eq('id', id);
-        renderView('accessories');
+        window.renderView('accessories');
         showToast('Item deleted', 'success');
     }
 };
@@ -857,11 +950,17 @@ window.editCCTV = async (id) => {
 
 const renderRepairs = async (container) => {
     container.innerHTML = `
-        <div class="flex justify-between items-center mb-6">
+        <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
             <h2 class="text-2xl font-bold text-textMain">Repair Logs</h2>
-             <button onclick="window.openAddRepairModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium shadow-none transition-all">
-                <i class="fas fa-plus mr-2"></i> Log Repair
-            </button>
+            <div class="flex gap-3 w-full md:w-auto">
+                 <div class="relative flex-1 md:w-64">
+                    <input type="text" id="repair-search" placeholder="Search asset, fault, tech..." class="w-full bg-surface border border-border rounded px-4 py-2 pl-9 text-sm focus:border-primary transition-colors">
+                    <i class="fas fa-search absolute left-3 top-2.5 text-textSub text-xs"></i>
+                </div>
+                <button onclick="window.openAddRepairModal()" class="px-4 py-2 bg-primary hover:bg-[#3E5C69] rounded text-white font-medium shadow-none transition-all whitespace-nowrap">
+                   <i class="fas fa-plus mr-2"></i> Log Repair
+               </button>
+            </div>
         </div>
         ${Table(['Date', 'Asset', 'Fault', 'Action', 'Cost', 'Technician'], 'repairs-body')}
     `;
@@ -871,19 +970,36 @@ const renderRepairs = async (container) => {
                                                             assets ( model, serialNumber )
                                                             `).order('date', { ascending: false });
 
-    if (repairs) {
-        const rows = repairs.map(r => `
-                                                            <tr class="hover:bg-dark transition-colors group">
-                                                                <td class="p-4 text-textSub font-mono text-sm">${formatDate(r.date)}</td>
-                                                                <td class="p-4 text-textMain font-medium text-sm">${r.assets?.model || 'Unknown'} <span class="text-xs text-textSub opacity-70">(${r.assets?.serialNumber || '?'})</span></td>
-                                                                <td class="p-4 text-textSub text-sm">${r.faultDescription}</td>
-                                                                <td class="p-4 text-textSub text-sm">${r.partsReplaced || '-'}</td>
-                                                                <td class="p-4 text-textSub text-sm font-mono">$${r.cost}</td>
-                                                                <td class="p-4 text-textSub text-sm">${r.technician}</td>
-                                                            </tr>
-                                                            `);
-        document.getElementById('repairs-body').innerHTML = rows.join('');
-    }
+    const renderRows = (list) => {
+        if (list && list.length > 0) {
+            const rows = list.map(r => `
+                <tr class="hover:bg-dark transition-colors group">
+                    <td class="p-4 text-textSub font-mono text-sm">${formatDate(r.date)}</td>
+                    <td class="p-4 text-textMain font-medium text-sm">${r.assets?.model || 'Unknown'} <span class="text-xs text-textSub opacity-70">(${r.assets?.serialNumber || '?'})</span></td>
+                    <td class="p-4 text-textSub text-sm">${r.faultDescription}</td>
+                    <td class="p-4 text-textSub text-sm">${r.partsReplaced || '-'}</td>
+                    <td class="p-4 text-textSub text-sm font-mono">$${r.cost}</td>
+                    <td class="p-4 text-textSub text-sm">${r.technician}</td>
+                </tr>
+            `);
+            document.getElementById('repairs-body').innerHTML = rows.join('');
+        } else {
+            document.getElementById('repairs-body').innerHTML = '<tr><td colspan="6" class="p-8 text-center text-textSub italic">No repair records found.</td></tr>';
+        }
+    };
+
+    if (repairs) renderRows(repairs);
+
+    document.getElementById('repair-search').addEventListener('input', (e) => {
+        const term = e.target.value.toLowerCase();
+        if (!repairs) return;
+        const filtered = repairs.filter(r =>
+            (r.assets?.model && r.assets.model.toLowerCase().includes(term)) ||
+            (r.faultDescription && r.faultDescription.toLowerCase().includes(term)) ||
+            (r.technician && r.technician.toLowerCase().includes(term))
+        );
+        renderRows(filtered);
+    });
 };
 
 // --- Window Global Functions ---
@@ -1005,7 +1121,7 @@ window.editAsset = async (id) => {
                                                                                                                                     </select>
                                                                                                                                     <select name="status" class="w-full bg-surface border border-border rounded px-4 py-3 text-sm focus:border-primary text-textMain">
                                                                                                                                         <option value="Available" ${asset.status === 'Available' ? 'selected' : ''}>Available</option>
-                                                                                                                                        ${asset.status === 'Issued' ? '<option value="Issued" selected>Issued</option>' : ''}
+                                                                                                                                        <option value="Issued" ${asset.status === 'Issued' ? 'selected' : ''}>Issued</option>
                                                                                                                                         <option value="Repair" ${asset.status === 'Repair' ? 'selected' : ''}>Repair</option>
                                                                                                                                         <option value="Scrap" ${asset.status === 'Scrap' ? 'selected' : ''}>Scrap</option>
                                                                                                                                     </select>
@@ -1289,22 +1405,89 @@ window.issueAsset = async (assetId) => {
     const staffOptions = staff.map(s => `<option value="${s.id}">${s.name} (${s.employeeId})</option>`).join('');
 
     const formHtml = `
-                                                                                                                                            <input type="hidden" name="assetId" value="${assetId}">
-                                                                                                                                                <div class="space-y-3">
-                                                                                                                                                    <div class="p-3 bg-white/5 rounded-xl border border-white/10">
-                                                                                                                                                        <p class="text-xs text-slate-400">Asset to Issue</p>
-                                                                                                                                                        <p class="font-medium text-white">${asset.model} - ${asset.serialNumber}</p>
-                                                                                                                                                    </div>
-                                                                                                                                                    <label class="block text-xs text-slate-400">Select Staff</label>
-                                                                                                                                                    <select name="staffId" required class="w-full bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary text-slate-300">
-                                                                                                                                                        <option value="">-- Select --</option>
-                                                                                                                                                        ${staffOptions}
-                                                                                                                                                    </select>
-                                                                                                                                                    <label class="block text-xs text-slate-400">Issue Date</label>
-                                                                                                                                                    <input type="date" name="issueDate" required value="${new Date().toISOString().split('T')[0]}" class="w-full bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary invert-calendar-icon">
-                                                                                                                                                </div>
-                                                                                                                                                `;
+        <input type="hidden" name="assetId" value="${assetId}">
+        <div class="space-y-4">
+            <div class="p-3 bg-surface rounded-xl border border-border">
+                <p class="text-xs text-textSub uppercase tracking-wider font-bold mb-1">Asset to Issue</p>
+                <p class="font-bold text-textMain text-sm">${asset.model}</p>
+                 <p class="text-xs text-textSub font-mono">${asset.serialNumber}</p>
+            </div>
+            
+            <div class="space-y-1 relative group" id="staff-search-container">
+                <label class="block text-xs font-bold text-textSub uppercase tracking-wider">Select Staff</label>
+                <input type="text" id="staff-search-input" placeholder="Search staff name or ID..." class="w-full bg-surface border border-border rounded px-4 py-2 text-sm focus:border-primary transition-colors text-textMain">
+                <input type="hidden" name="staffId" id="selected-staff-id" required>
+                
+                <div id="staff-options-list" class="absolute left-0 right-0 top-[60px] max-h-48 overflow-y-auto bg-dark border border-border rounded shadow-xl z-50 hidden custom-scrollbar">
+                    ${staff.map(s => `
+                        <div class="staff-option p-2 hover:bg-white/5 cursor-pointer text-sm text-textSub hover:text-textMain transition-colors border-b border-border/50 last:border-0" 
+                             data-id="${s.id}" 
+                             data-name="${s.name} (${s.employeeId})">
+                            <div class="font-medium">${s.name}</div>
+                            <div class="text-xs opacity-70">${s.employeeId} • ${s.department || 'No Dept'}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div class="space-y-1">
+                <label class="block text-xs font-bold text-textSub uppercase tracking-wider">Issue Date</label>
+                 <input type="date" name="issueDate" required value="${new Date().toISOString().split('T')[0]}" class="w-full bg-surface border border-border rounded px-4 py-2 text-sm focus:border-primary transition-colors text-textMain invert-calendar-icon">
+            </div>
+        </div>
+    `;
+
     openModal('issueAssetModal', 'Issue Asset', formHtml, 'Confirm Issue', 'submitIssue');
+
+    // Attach Search Logic
+    setTimeout(() => {
+        const searchInput = document.getElementById('staff-search-input');
+        const optionsList = document.getElementById('staff-options-list');
+        const hiddenInput = document.getElementById('selected-staff-id');
+        const options = document.querySelectorAll('.staff-option');
+
+        if (!searchInput || !optionsList) return;
+
+        // Show options on focus
+        searchInput.addEventListener('focus', () => {
+            optionsList.classList.remove('hidden');
+        });
+
+        // Hide options on click outside
+        document.addEventListener('click', (e) => {
+            if (!document.getElementById('staff-search-container').contains(e.target)) {
+                optionsList.classList.add('hidden');
+            }
+        });
+
+        // Filter options
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            let hasVisible = false;
+            options.forEach(opt => {
+                const text = opt.innerText.toLowerCase();
+                if (text.includes(term)) {
+                    opt.classList.remove('hidden');
+                    hasVisible = true;
+                } else {
+                    opt.classList.add('hidden');
+                }
+            });
+            optionsList.classList.remove('hidden');
+        });
+
+        // Select option
+        options.forEach(opt => {
+            opt.addEventListener('click', () => {
+                const id = opt.getAttribute('data-id');
+                const name = opt.getAttribute('data-name');
+
+                hiddenInput.value = id;
+                searchInput.value = name;
+                optionsList.classList.add('hidden');
+            });
+        });
+    }, 100);
 };
 
 window.returnAsset = async (assetId, context = 'assets', staffId = null) => {
@@ -1568,10 +1751,11 @@ window.handleFormSubmit = async (event, action, modalId) => {
             }]);
             if (error) throw error;
             showToast('Asset added successfully', 'success');
-            renderView('assets');
+            window.renderView('assets');
         } else if (action === 'updateAsset') {
-            // Auto-close assignment if status changed from Issued to something else
-            if (data.status !== 'Issued') {
+            // Auto-close assignment if status changed from Issued to Available or Scrap
+            // (Keep assignment active if just sending to Repair)
+            if (['Available', 'Scrap'].includes(data.status)) {
                 const { data: activeAssignment } = await supabase.from('assignments')
                     .select('id')
                     .eq('assetId', data.id)
@@ -1598,17 +1782,17 @@ window.handleFormSubmit = async (event, action, modalId) => {
             }).eq('id', data.id);
             if (error) throw error;
             showToast('Asset updated', 'success');
-            renderView('assets');
+            window.renderView('assets');
         } else if (action === 'createStaff') {
             const { error } = await supabase.from('staff').insert([data]);
             if (error) throw error;
             showToast('Staff added', 'success');
-            renderView('staff');
+            window.renderView('staff');
         } else if (action === 'createCCTV') {
             const { error } = await supabase.from('cctv').insert([data]);
             if (error) throw error;
             showToast('Camera added', 'success');
-            renderView('cctv');
+            window.renderView('cctv');
         } else if (action === 'updateCCTV') {
             const updateData = {
                 floor: data.floor,
@@ -1622,7 +1806,7 @@ window.handleFormSubmit = async (event, action, modalId) => {
             const { error } = await supabase.from('cctv').update(updateData).eq('id', data.id);
             if (error) throw error;
             showToast('Camera updated', 'success');
-            renderView('cctv');
+            window.renderView('cctv');
         } else if (action === 'createAccessoryItem') {
             const { error } = await supabase.from('accessories').insert([{
                 type: data.type,
@@ -1633,7 +1817,7 @@ window.handleFormSubmit = async (event, action, modalId) => {
             }]);
             if (error) throw error;
             showToast('Item added', 'success');
-            renderView('accessories');
+            window.renderView('accessories');
         } else if (action === 'updateAccessoryItem') {
             const { error } = await supabase.from('accessories').update({
                 type: data.type,
@@ -1644,7 +1828,7 @@ window.handleFormSubmit = async (event, action, modalId) => {
             }).eq('id', data.id);
             if (error) throw error;
             showToast('Item updated', 'success');
-            renderView('accessories');
+            window.renderView('accessories');
 
         } else if (action === 'createCCTVRepair') {
             const { error } = await supabase.from('cctv_repairs').insert([{
@@ -1702,7 +1886,7 @@ window.handleFormSubmit = async (event, action, modalId) => {
             }]);
 
             showToast('Camera Replaced Successfully', 'success');
-            renderView('cctv');
+            window.renderView('cctv');
         } else if (action === 'createRepair') {
             let partsText = data.partsReplaced || ''; // Ensure it's a string
             if (data.cannibalizedFromId) {
@@ -1726,7 +1910,7 @@ window.handleFormSubmit = async (event, action, modalId) => {
             await supabase.from('assets').update({ status: 'Repair' }).eq('id', data.assetId);
 
             showToast('Repair logged', 'success');
-            renderView('repairs');
+            window.renderView('repairs');
         } else if (action === 'submitIssue') {
             await supabase.from('assets').update({ status: 'Issued' }).eq('id', data.assetId);
             await supabase.from('assignments').insert([{

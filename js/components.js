@@ -30,7 +30,7 @@ export const Table = (headers, bodyId) => `
     </div>
 `;
 
-export const AssetRow = (asset) => {
+export const AssetRow = (asset, assignedTo = null) => {
     // Enterprise status colors (Subtle badges)
     const statusClasses = {
         'Available': 'bg-[#163326] text-[#4ADE80] border border-[#163326]', // Subtle Green
@@ -59,6 +59,10 @@ export const AssetRow = (asset) => {
                 <span class="px-2 py-0.5 rounded text-[11px] font-medium uppercase tracking-wide ${statusClass}">
                     ${asset.status}
                 </span>
+                </span>
+            </td>
+            <td class="p-4 text-textSub text-sm">
+                ${assignedTo ? `<span class="flex items-center gap-1.5 text-textMain"><i class="fas fa-user text-primary text-xs"></i> ${assignedTo}</span>` : '<span class="opacity-30">-</span>'}
             </td>
             <td class="p-4">
                 <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
@@ -121,7 +125,7 @@ export const CCTVCard = (camera) => {
     }
 
     return `
-        <div class="bg-surface p-4 rounded bg-opacity-50 border border-border ${borderColor} relative overflow-hidden transition-colors hover:bg-[#1E2229] card-hover transform transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+        <div class="bg-surface rounded-xl border ${borderColor} p-4 h-full relative group transition-all duration-300 hover:-translate-y-1 hover:shadow-lg cctv-card" data-search="${(camera.model || '').toLowerCase()} ${(camera.serialNumber || '').toLowerCase()} ${(camera.cameraLocation || '').toLowerCase()}">
             <div class="flex justify-between items-start mb-3">
                 <div>
                      <span class="text-[10px] uppercase font-bold text-textSub tracking-wider">${camera.floor || 'Unassigned'}</span>
