@@ -2188,7 +2188,7 @@ window.generateHandoverForm = async (assetId, staffId) => {
         }
 
         // 2. Load PDF Template
-        const existingPdfBytes = await fetch('https://github.com/kaveeshaperera728/newsyst/blob/main/Temp.pdf').then(res => {
+        const existingPdfBytes = await fetch('/Temp.pdf').then(res => {
             if (!res.ok) throw new Error("Could not load /Temp.pdf");
             return res.arrayBuffer();
         });
